@@ -1,0 +1,25 @@
+.gradle/
+build/
+out/
+*.class
+*.tmp
+
+# IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Eclipse
+.classpath
+.project
+.settings/
+bin/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Agent workflow scratch artifacts
+.agents/
+build-output.txt
