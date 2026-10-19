@@ -82,8 +82,8 @@ public interface ItemValueFluctuationConfig extends Config
 	@ConfigItem(
 		keyName = "labelMode",
 		name = "Label shows",
-		description = "What the slot label displays: the percent change, the per-item gp change,"
-			+ " or the whole stack's gp change (shortened as K/M/B)",
+		description = "What the slot label displays: the percent change, the per-item GP change,"
+			+ " or the whole stack's GP change (shortened as K/M/B)",
 		section = generalSection,
 		position = 4
 	)
@@ -103,6 +103,45 @@ public interface ItemValueFluctuationConfig extends Config
 	default boolean showTooltip()
 	{
 		return true;
+	}
+
+	@ConfigItem(
+		keyName = "highlightStyle",
+		name = "Highlight style",
+		description = "How a moved item's slot is drawn: a filled square wash or a thick glowing"
+			+ " outline (so you can still read what the item is)",
+		section = generalSection,
+		position = 6
+	)
+	default HighlightStyle highlightStyle()
+	{
+		return HighlightStyle.OUTLINE;
+	}
+
+	@ConfigItem(
+		keyName = "showBankHighlights",
+		name = "Show bank highlights",
+		description = "Colour the bank slots. Turn off to keep the bank uncoloured while still"
+			+ " using the Movers side panel.",
+		section = generalSection,
+		position = 7
+	)
+	default boolean showBankHighlights()
+	{
+		return true;
+	}
+
+	@Range(min = 1, max = 5)
+	@ConfigItem(
+		keyName = "outlineThickness",
+		name = "Outline thickness",
+		description = "Border thickness (in pixels) for the Outline highlight style",
+		section = generalSection,
+		position = 8
+	)
+	default int outlineThickness()
+	{
+		return 2;
 	}
 
 	// ------------------------------------------------------------------
@@ -220,9 +259,9 @@ public interface ItemValueFluctuationConfig extends Config
 	@Range(min = 0)
 	@ConfigItem(
 		keyName = "minYearRangeGp",
-		name = "Min yearly range (gp)",
-		description = "Only ring an item whose 1-year high is at least this many gp above its"
-			+ " 1-year low (per item). A few gp of yearly wiggle on a cheap commodity is not a"
+		name = "Min yearly range (GP)",
+		description = "Only ring an item whose 1-year high is at least this many GP above its"
+			+ " 1-year low (per item). A few GP of yearly wiggle on a cheap commodity is not a"
 			+ " meaningful 'near the high' signal, even if the percent looks large.",
 		section = yearHighSection,
 		position = 7
@@ -246,7 +285,7 @@ public interface ItemValueFluctuationConfig extends Config
 	@ConfigItem(
 		keyName = "minItemValue",
 		name = "Min item value",
-		description = "Ignore items whose current value (per item) is below this many gp."
+		description = "Ignore items whose current value (per item) is below this many GP."
 			+ " Keeps low-value junk from lighting up.",
 		section = filterSection,
 		position = 0
@@ -261,7 +300,7 @@ public interface ItemValueFluctuationConfig extends Config
 		keyName = "minTotalValue",
 		name = "Min total value",
 		description = "Ignore a bank slot whose whole stack (price x quantity) is worth less than"
-			+ " this many gp. Keeps small stacks you don't care about from lighting up.",
+			+ " this many GP. Keeps small stacks you don't care about from lighting up.",
 		section = filterSection,
 		position = 1
 	)
@@ -273,8 +312,8 @@ public interface ItemValueFluctuationConfig extends Config
 	@Range(min = 0)
 	@ConfigItem(
 		keyName = "minGpSwing",
-		name = "Min gp swing",
-		description = "Only highlight when the per-item price moved at least this many gp."
+		name = "Min GP swing",
+		description = "Only highlight when the per-item price moved at least this many GP."
 			+ " A big percent move on a cheap item can still be noise.",
 		section = filterSection,
 		position = 2

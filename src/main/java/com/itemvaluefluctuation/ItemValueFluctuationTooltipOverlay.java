@@ -104,6 +104,12 @@ class ItemValueFluctuationTooltipOverlay extends Overlay
 				continue;
 			}
 
+			// Skip bank placeholders (empty remembered slots, quantity 0): not owned, so no tooltip.
+			if (item.getItemQuantity() <= 0)
+			{
+				continue;
+			}
+
 			final Rectangle bounds = item.getBounds();
 			if (bounds == null || !viewport.intersects(bounds) || !bounds.contains(mousePoint))
 			{
@@ -182,25 +188,25 @@ class ItemValueFluctuationTooltipOverlay extends Overlay
 				.build());
 			panel.getChildren().add(LineComponent.builder()
 				.left("Current")
-				.right(QuantityFormatter.formatNumber(f.getCurrentPrice()) + " gp")
+				.right(QuantityFormatter.formatNumber(f.getCurrentPrice()) + " GP")
 				.build());
 			panel.getChildren().add(LineComponent.builder()
 				.left("Was")
-				.right(QuantityFormatter.formatNumber(f.getAnchorPrice()) + " gp")
+				.right(QuantityFormatter.formatNumber(f.getAnchorPrice()) + " GP")
 				.build());
 			panel.getChildren().add(LineComponent.builder()
 				.left(timeFrame.getDisplayName() + " high")
-				.right(QuantityFormatter.formatNumber(f.getPeriodHigh()) + " gp")
+				.right(QuantityFormatter.formatNumber(f.getPeriodHigh()) + " GP")
 				.build());
 			panel.getChildren().add(LineComponent.builder()
 				.left(timeFrame.getDisplayName() + " low")
-				.right(QuantityFormatter.formatNumber(f.getPeriodLow()) + " gp")
+				.right(QuantityFormatter.formatNumber(f.getPeriodLow()) + " GP")
 				.build());
 			if (qty > 1)
 			{
 				panel.getChildren().add(LineComponent.builder()
 					.left("Stack (" + QuantityFormatter.formatNumber(qty) + ")")
-					.right(QuantityFormatter.formatNumber(stackValue) + " gp")
+					.right(QuantityFormatter.formatNumber(stackValue) + " GP")
 					.build());
 				panel.getChildren().add(LineComponent.builder()
 					.left("Stack change")
@@ -222,7 +228,7 @@ class ItemValueFluctuationTooltipOverlay extends Overlay
 				panel.getChildren().add(LineComponent.builder()
 					.left("At 1-year high")
 					.right(yearHigh != null
-						? QuantityFormatter.formatNumber(yearHigh) + " gp" : "")
+						? QuantityFormatter.formatNumber(yearHigh) + " GP" : "")
 					.leftColor(ringColor)
 					.rightColor(ringColor)
 					.build());
@@ -232,7 +238,7 @@ class ItemValueFluctuationTooltipOverlay extends Overlay
 				panel.getChildren().add(LineComponent.builder()
 					.left("Within " + config.nearHighThresholdPct() + "% of 1-year high")
 					.right(yearHigh != null
-						? QuantityFormatter.formatNumber(yearHigh) + " gp" : "")
+						? QuantityFormatter.formatNumber(yearHigh) + " GP" : "")
 					.leftColor(ringColor)
 					.rightColor(ringColor)
 					.build());
@@ -350,6 +356,6 @@ class ItemValueFluctuationTooltipOverlay extends Overlay
 	private static String signedGp(long gp)
 	{
 		final String sign = gp > 0 ? "+" : (gp < 0 ? "-" : "");
-		return sign + QuantityFormatter.formatNumber(Math.abs(gp)) + " gp";
+		return sign + QuantityFormatter.formatNumber(Math.abs(gp)) + " GP";
 	}
 }

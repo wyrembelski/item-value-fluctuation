@@ -12,6 +12,14 @@ import java.awt.GridLayout;
 import java.awt.Insets;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.FormatStyle;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -47,6 +55,7 @@ import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.util.AsyncBufferedImage;
+import net.runelite.client.util.LinkBrowser;
 import net.runelite.client.util.QuantityFormatter;
 
 /**
@@ -102,6 +111,7 @@ class ItemValueFluctuationPanel extends PluginPanel
 	private JComboBox<MoverView.Mode> viewCombo;
 	private JComboBox<TimeFrame> timeFrameCombo;
 	private JCheckBox ringToggle;
+	private JCheckBox highlightsToggle;
 	private JButton sortDirButton;
 
 	/** Sort direction: true = natural (descending for the gp/%/value modes), false = reversed. */
@@ -112,6 +122,23 @@ class ItemValueFluctuationPanel extends PluginPanel
 	private JPanel detailBody;
 	private JPanel helpView;
 	private Timer debounceTimer;
+
+	/**
+	 * A small, greyed "last updated" line in the header, shown whenever there is bank data (live or
+	 * snapshot): "Updated &lt;time&gt;" while the bank is open, "Bank as of &lt;time&gt;" once it is
+	 * closed and we render the remembered snapshot. Hidden only when there is no data yet. EDT only.
+	 */
+	private JLabel snapshotHint;
+
+	/**
+	 * The one-line aggregate-movement summary of all currently-shown (tracked) items, e.g.
+	 * "Tracked: +4.2M (+1.8%)". Computed on the client thread (pure arithmetic over the gathered
+	 * rows), carried across in the snapshot, rendered here. Hidden when there are no rows. EDT only.
+	 */
+	private JLabel trackedSummary;
+
+	/** The latest aggregate-movement totals carried from the client thread; rendered on the EDT. */
+	private MoverSort.TotalMovement trackedTotal = MoverSort.totalMovement(Collections.emptyList());
 
 	/** True once the Swing skeleton exists (EDT only). Used to retain refresh demand before init. */
 	private boolean uiReady;
@@ -128,6 +155,41 @@ class ItemValueFluctuationPanel extends PluginPanel
 	/** The latest snapshot applied on the EDT; read by the sort/view listeners. */
 	private List<PanelRowData> rows = Collections.emptyList();
 	private boolean loading;
+
+	/**
+	 * The raw contents (itemId + quantity per slot) of the LAST bank the user had open this session,
+	 * captured on the client thread inside {@link #rebuildOnClientThread}. When the bank is closed
+	 * the container is null, so we re-run the same resolution/pricing/filtering pipeline over this
+	 * remembered list instead of showing an empty panel, letting prices (and time-frame cycling)
+	 * keep updating off-bank from the still-valid {@link PriceService} caches.
+	 *
+	 * <p>CLIENT-THREAD ONLY: written and read exclusively inside {@code rebuildOnClientThread} on the
+	 * client thread. The one off-client-thread touch is {@link #clearBankSnapshot()} (logout/teardown),
+	 * which replaces the reference atomically; the field is {@code volatile} so that clear is safely
+	 * published to the client thread. IN-MEMORY ONLY — never persisted (stale bank data shown as
+	 * current would mislead).
+	 */
+	private volatile List<BankSlot> bankSnapshot;
+
+	/**
+	 * When {@link #bankSnapshot} was captured, in wall-clock time, so the panel can show the user
+	 * WHEN their last bank visit was ("Bank as of 3:42 PM"). Follows the exact same lifecycle and
+	 * threading discipline as {@link #bankSnapshot}: written on the client thread in
+	 * {@link #rebuildOnClientThread} right where the snapshot is built, cleared together with the
+	 * snapshot in {@link #clearBankSnapshot()}; {@code volatile} so that clear publishes safely.
+	 * IN-MEMORY ONLY — never persisted.
+	 */
+	private volatile Instant bankSnapshotCapturedAt;
+
+	/** True on the EDT while the panel is rendering from {@link #bankSnapshot} (bank closed). */
+	private boolean showingSnapshot;
+
+	/**
+	 * The last-data-gather time carried across to the EDT, so {@link #updateSnapshotHint()} can
+	 * render a locale/zone-aware "last updated" line for either render mode. EDT only; null only
+	 * when there is no bank data yet this session (hint hidden).
+	 */
+	private Instant snapshotHintTime;
 
 	@Inject
 	ItemValueFluctuationPanel(Client client, ClientThread clientThread, ItemManager itemManager,
@@ -184,12 +246,33 @@ class ItemValueFluctuationPanel extends PluginPanel
 		int g = generation.get();
 		generation.set((g % 2 == 0) ? g + 2 : g + 1);
 
+		// Drop the remembered bank contents so nothing leaks across a disable/re-enable or lingers
+		// in memory after shutdown. In-memory only; never persisted.
+		clearBankSnapshot();
+
 		runOnEdt(() ->
 		{
 			if (debounceTimer != null)
 			{
 				debounceTimer.stop();
 			}
+		});
+	}
+
+	/**
+	 * Forgets the last-seen bank contents. Called on logout/hop (from the plugin) and on teardown.
+	 * The field is {@code volatile}, so this is safe to call from any thread; the next client-thread
+	 * rebuild then sees an empty source and the panel returns to its placeholder state.
+	 */
+	void clearBankSnapshot()
+	{
+		bankSnapshot = null;
+		bankSnapshotCapturedAt = null;
+		runOnEdt(() ->
+		{
+			showingSnapshot = false;
+			snapshotHintTime = null;
+			updateSnapshotHint();
 		});
 	}
 
@@ -264,12 +347,30 @@ class ItemValueFluctuationPanel extends PluginPanel
 		viewCombo = new JComboBox<>(MoverView.Mode.values());
 		timeFrameCombo = new JComboBox<>(TimeFrame.values());
 		ringToggle = new JCheckBox();
+		highlightsToggle = new JCheckBox();
 		sortDirButton = new JButton();
 		listView = new JPanel(new BorderLayout());
 		listContainer = new JPanel();
 		detailView = new JPanel(new BorderLayout());
 		detailBody = new JPanel();
 		helpView = new JPanel(new BorderLayout());
+
+		// "Last updated" line: subtle, greyed. Text/tooltip are set per-render in updateSnapshotHint
+		// ("Updated <time>" live vs "Bank as of <time>" off-bank); hidden until there is bank data.
+		snapshotHint = new JLabel();
+		snapshotHint.setForeground(ColorScheme.LIGHT_GRAY_COLOR.darker());
+		snapshotHint.setFont(FontManager.getRunescapeSmallFont());
+		snapshotHint.setAlignmentX(LEFT_ALIGNMENT);
+		snapshotHint.setVisible(false);
+
+		// Aggregate-movement summary of the tracked items, shown at the top of the controls stack.
+		// Bold so it reads as the headline number; colour + text set in updateTrackedSummary().
+		trackedSummary = new JLabel();
+		trackedSummary.setFont(FontManager.getRunescapeBoldFont());
+		trackedSummary.setToolTipText("Combined movement of the items shown below, over the selected"
+			+ " time frame (value-weighted).");
+		trackedSummary.setAlignmentX(LEFT_ALIGNMENT);
+		trackedSummary.setVisible(false);
 
 		// The timer fires on the EDT and only schedules the client-thread gather; it never reads
 		// client. It bails if the plugin was torn down between the restart() and the fire.
@@ -326,11 +427,15 @@ class ItemValueFluctuationPanel extends PluginPanel
 		final boolean latestLoaded = priceService.isLatestLoaded();
 		final ItemContainer bank = client.getItemContainer(InventoryID.BANK);
 
-		final List<PanelRowData> gathered = new ArrayList<>();
-		final List<AsyncBufferedImage> icons = new ArrayList<>();
-
-		if (bank != null && latestLoaded)
+		// Capture the raw bank contents (BEFORE any filtering) as this session's "last seen" snapshot
+		// whenever the bank is actually open. When it is closed (container null) we fall back to the
+		// remembered snapshot so the panel keeps showing the user's movers off-bank. The pricing /
+		// filtering pipeline below runs identically over whichever source we pick.
+		final List<BankSlot> source;
+		final boolean fromSnapshot;
+		if (bank != null)
 		{
+			final List<BankSlot> captured = new ArrayList<>();
 			for (Item item : bank.getItems())
 			{
 				if (item == null)
@@ -339,6 +444,44 @@ class ItemValueFluctuationPanel extends PluginPanel
 				}
 				final int itemId = item.getId();
 				final int quantity = item.getQuantity();
+				if (itemId <= 0 || quantity <= 0)
+				{
+					continue;
+				}
+				captured.add(new BankSlot(itemId, quantity));
+			}
+			bankSnapshot = Collections.unmodifiableList(captured);
+			// Stamp WHEN this snapshot was taken so the off-bank hint can say "Bank as of <time>".
+			// Same client-thread-confined write as the snapshot itself.
+			bankSnapshotCapturedAt = Instant.now();
+			source = bankSnapshot;
+			fromSnapshot = false;
+		}
+		else
+		{
+			// Bank closed: reuse the last-seen snapshot. If there is none yet (never opened the bank
+			// this session) this is empty, so the panel keeps its existing placeholder state.
+			final List<BankSlot> remembered = bankSnapshot;
+			source = remembered;
+			fromSnapshot = remembered != null && !remembered.isEmpty();
+		}
+
+		// The capture time to display with the off-bank hint (only meaningful when fromSnapshot).
+		final Instant capturedAt = bankSnapshotCapturedAt;
+
+		final List<PanelRowData> gathered = new ArrayList<>();
+		final List<AsyncBufferedImage> icons = new ArrayList<>();
+
+		if (source != null && latestLoaded)
+		{
+			for (BankSlot slot : source)
+			{
+				final int itemId = slot.itemId;
+				final int quantity = slot.quantity;
+
+				// Belt-and-suspenders: never surface a placeholder (quantity 0, an item you do not
+				// actually own). The capture loop already filters these, but passesPreCheck below
+				// treats quantity via Math.max(1, quantity), so a 0 here would read as owning one.
 				if (itemId <= 0 || quantity <= 0)
 				{
 					continue;
@@ -410,8 +553,18 @@ class ItemValueFluctuationPanel extends PluginPanel
 			|| priceService.pendingCount(timeFrame) > 0;
 		final List<PanelRowData> snapshot = Collections.unmodifiableList(gathered);
 		final List<AsyncBufferedImage> iconSnapshot = Collections.unmodifiableList(icons);
+		final boolean renderingFromSnapshot = fromSnapshot;
+		// Carry the capture time for BOTH render modes: when the bank is open this is the instant we
+		// just (re)captured the snapshot above (the live "Updated <time>"); when closed it is the
+		// last bank visit's capture time (the "Bank as of <time>"). Either way it reflects the LAST
+		// ACTUAL DATA GATHER - we never poll in the background, so off-bank it stays frozen there
+		// (an honest staleness signal), and null only when there is no bank data at all this session.
+		final Instant renderingCapturedAt = capturedAt;
+		// Aggregate movement of the tracked (gathered) items: pure arithmetic over the data already
+		// in each row, computed here on the client thread so the EDT never walks widgets for it.
+		final MoverSort.TotalMovement total = MoverSort.totalMovement(snapshot);
 		SwingUtilities.invokeLater(() -> applySnapshot(gen, snapshot, iconSnapshot, timeFrame,
-			stillLoading));
+			stillLoading, renderingFromSnapshot, renderingCapturedAt, total));
 	}
 
 	/** Sum of each component's bulk /latest low times its quantity, or {@code null} if unknown. */
@@ -558,8 +711,30 @@ class ItemValueFluctuationPanel extends PluginPanel
 			refresh();
 		});
 
+		// Bank-highlights on/off: colour the bank slots or not. The side panel stays fully
+		// populated either way (it gathers independently of the overlay's drawing).
+		highlightsToggle.setText("Colour bank slots");
+		highlightsToggle.setSelected(config.showBankHighlights());
+		highlightsToggle.setFocusable(false);
+		highlightsToggle.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		highlightsToggle.setForeground(Color.WHITE);
+		highlightsToggle.setFont(FontManager.getRunescapeSmallFont());
+		highlightsToggle.setAlignmentX(LEFT_ALIGNMENT);
+		highlightsToggle.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR),
+			BorderFactory.createEmptyBorder(3, 4, 3, 4)));
+		highlightsToggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+		highlightsToggle.addActionListener(e ->
+		{
+			configManager.setConfiguration(ItemValueFluctuationConfig.CONFIG_GROUP,
+				"showBankHighlights", highlightsToggle.isSelected());
+			refresh();
+		});
+
 		// One tidy vertical stack of labeled rows: label on its own line, full-width control under
 		// it, uniform gaps. Nothing truncates in the narrow (~225px) panel.
+		controls.add(trackedSummary);
+		controls.add(verticalGap());
 		controls.add(labeledRow("Time frame", timeFrameCombo));
 		controls.add(verticalGap());
 		controls.add(labeledRow("Sort", sortField));
@@ -567,6 +742,10 @@ class ItemValueFluctuationPanel extends PluginPanel
 		controls.add(labeledRow("Filter", viewCombo));
 		controls.add(verticalGap());
 		controls.add(ringToggle);
+		controls.add(verticalGap());
+		controls.add(highlightsToggle);
+		controls.add(verticalGap());
+		controls.add(snapshotHint);
 
 		final JPanel north = new JPanel(new BorderLayout());
 		north.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -643,7 +822,8 @@ class ItemValueFluctuationPanel extends PluginPanel
 	// ------------------------------------------------------------------
 
 	private void applySnapshot(int gen, List<PanelRowData> snapshot, List<AsyncBufferedImage> icons,
-		TimeFrame timeFrame, boolean stillLoading)
+		TimeFrame timeFrame, boolean stillLoading, boolean renderingFromSnapshot,
+		@Nullable Instant capturedAt, MoverSort.TotalMovement total)
 	{
 		// Reject a snapshot from a torn-down / superseded generation, or before the UI exists.
 		if (gen != generation.get() || !uiReady)
@@ -651,7 +831,13 @@ class ItemValueFluctuationPanel extends PluginPanel
 			return;
 		}
 		this.rows = snapshot;
+		this.trackedTotal = total;
 		this.loading = stillLoading;
+		this.showingSnapshot = renderingFromSnapshot;
+		// Keep the capture time for either render mode so the "last updated" line can show for live
+		// data too (not only off-bank). Null when there is no bank data at all this session.
+		this.snapshotHintTime = capturedAt;
+		updateSnapshotHint();
 		this.iconsByRawId.clear();
 		for (int i = 0; i < snapshot.size(); i++)
 		{
@@ -673,6 +859,12 @@ class ItemValueFluctuationPanel extends PluginPanel
 		{
 			ringToggle.setSelected(config.highlightNearYearHigh());
 		}
+		if (highlightsToggle.isSelected() != config.showBankHighlights())
+		{
+			highlightsToggle.setSelected(config.showBankHighlights());
+		}
+
+		updateTrackedSummary();
 
 		listContainer.removeAll();
 
@@ -754,7 +946,7 @@ class ItemValueFluctuationPanel extends PluginPanel
 		{
 			text.setLayout(new GridLayout(3, 1));
 			final JLabel stack = new JLabel(
-				QuantityFormatter.quantityToStackSize(r.stackValue()) + " gp"
+				QuantityFormatter.quantityToStackSize(r.stackValue()) + " GP"
 				+ " (\u00d7" + QuantityFormatter.formatNumber(r.getQuantity()) + ")");
 			stack.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 			stack.setFont(FontManager.getRunescapeSmallFont());
@@ -817,6 +1009,15 @@ class ItemValueFluctuationPanel extends PluginPanel
 
 		detailBody.add(detailTitle(r.getName()));
 
+		// "View on Wiki" opens the clicked item's own OSRS Wiki article (which carries the GE price
+		// graph) in the browser. Skipped when the name is somehow absent. No network call here -
+		// LinkBrowser just hands the URL to the user's browser.
+		final JLabel wikiLink = buildWikiLink(r.getName());
+		if (wikiLink != null)
+		{
+			detailBody.add(wikiLink);
+		}
+
 		if (r.isPricedFromComponents())
 		{
 			detailBody.add(detailLine("Priced from " + r.getComponentCount() + " components",
@@ -832,18 +1033,18 @@ class ItemValueFluctuationPanel extends PluginPanel
 			ItemValueFluctuationOverlay.formatPercent(f.getPercentChange())
 				+ "  (" + signedGp(f.getGpChange()) + ")", changeColor));
 		detailBody.add(detailLine("Current",
-			QuantityFormatter.formatNumber(f.getCurrentPrice()) + " gp", null));
+			QuantityFormatter.formatNumber(f.getCurrentPrice()) + " GP", null));
 		detailBody.add(detailLine("Was",
-			QuantityFormatter.formatNumber(f.getAnchorPrice()) + " gp", null));
+			QuantityFormatter.formatNumber(f.getAnchorPrice()) + " GP", null));
 		detailBody.add(detailLine("Window high",
-			QuantityFormatter.formatNumber(f.getPeriodHigh()) + " gp", null));
+			QuantityFormatter.formatNumber(f.getPeriodHigh()) + " GP", null));
 		detailBody.add(detailLine("Window low",
-			QuantityFormatter.formatNumber(f.getPeriodLow()) + " gp", null));
+			QuantityFormatter.formatNumber(f.getPeriodLow()) + " GP", null));
 
 		if (qty > 1)
 		{
 			detailBody.add(detailLine("Stack (" + QuantityFormatter.formatNumber(qty) + ")",
-				QuantityFormatter.formatNumber(r.stackValue()) + " gp", null));
+				QuantityFormatter.formatNumber(r.stackValue()) + " GP", null));
 			detailBody.add(detailLine("Stack change",
 				ItemValueFluctuationOverlay.formatSignedGp(r.stackGpChange()), changeColor));
 		}
@@ -856,13 +1057,92 @@ class ItemValueFluctuationPanel extends PluginPanel
 				? "At 1-year high"
 				: "Within " + config.nearHighThresholdPct() + "% of 1-year high";
 			detailBody.add(detailLine("1-year high",
-				QuantityFormatter.formatNumber(r.getYearHigh()) + " gp", ring));
+				QuantityFormatter.formatNumber(r.getYearHigh()) + " GP", ring));
 			detailBody.add(detailLine(label, null, ring));
 		}
 
 		detailBody.revalidate();
 		detailBody.repaint();
 		showView(detailView);
+	}
+
+	/**
+	 * A clickable "View on Wiki" link for the clicked item, styled like a hyperlink (link colour,
+	 * hand cursor). Clicking opens the item's OSRS Wiki article via {@link LinkBrowser#browse} (the
+	 * sanctioned helper - never {@code java.awt.Desktop}). Returns {@code null} when the name is
+	 * null/blank so the caller simply omits the link. EDT only.
+	 */
+	@Nullable
+	private JLabel buildWikiLink(@Nullable String name)
+	{
+		if (name == null || name.trim().isEmpty())
+		{
+			return null;
+		}
+		final String url = wikiUrl(name);
+
+		// Styled as an obvious button (accent-coloured border + fill + padding) so it clearly reads
+		// as a clickable link rather than plain text. The arrow hints that it opens externally.
+		final Color accent = ColorScheme.BRAND_ORANGE;
+		final Color idleBg = ColorScheme.DARKER_GRAY_COLOR;
+		final Color hoverBg = ColorScheme.DARK_GRAY_HOVER_COLOR;
+
+		final JLabel link = new JLabel("View on Wiki \u2197");
+		link.setFont(FontManager.getRunescapeSmallFont());
+		link.setForeground(accent);
+		link.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		link.setOpaque(true);
+		link.setBackground(idleBg);
+		link.setHorizontalAlignment(SwingConstants.CENTER);
+		link.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createLineBorder(accent, 1),
+			BorderFactory.createEmptyBorder(4, 10, 4, 10)));
+		link.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
+		link.setToolTipText("Open " + name.trim() + " on the OSRS Wiki");
+		link.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				LinkBrowser.browse(url);
+			}
+
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				link.setBackground(hoverBg);
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				link.setBackground(idleBg);
+			}
+		});
+		return link;
+	}
+
+	/**
+	 * The canonical OSRS Wiki article URL for an item name: {@code
+	 * https://oldschool.runescape.wiki/w/<Name>} with spaces replaced by underscores (the wiki's
+	 * convention for article paths) and the remaining characters URL-encoded for a path segment.
+	 */
+	private static String wikiUrl(String name)
+	{
+		final String underscored = name.trim().replace(' ', '_');
+		String encoded;
+		try
+		{
+			// URLEncoder would turn spaces into "+", but we have already swapped them for
+			// underscores (which it leaves untouched), so the result is a valid /w/ path segment.
+			encoded = URLEncoder.encode(underscored, StandardCharsets.UTF_8.name());
+		}
+		catch (UnsupportedEncodingException e)
+		{
+			// UTF-8 is always supported; fall back to the raw underscored name just in case.
+			encoded = underscored;
+		}
+		return "https://oldschool.runescape.wiki/w/" + encoded;
 	}
 
 	private JLabel detailTitle(String name)
@@ -923,6 +1203,84 @@ class ItemValueFluctuationPanel extends PluginPanel
 		repaint();
 	}
 
+	/**
+	 * Shows a persistent "last updated" line stamped with WHEN the data was last gathered, in the
+	 * user's local time. The wording follows the data source: "Updated &lt;time&gt;" while the bank
+	 * is open (live), "Bank as of &lt;time&gt;" once the bank is closed and we are rendering the
+	 * remembered snapshot. Hidden entirely when there is no bank data yet this session (nothing to
+	 * timestamp). The time reflects the LAST ACTUAL DATA GATHER and does NOT tick in the background
+	 * (we never poll off-bank) - a frozen off-bank time is an intentional, honest staleness signal.
+	 * EDT only.
+	 */
+	private void updateSnapshotHint()
+	{
+		if (snapshotHint == null)
+		{
+			return;
+		}
+		if (snapshotHintTime == null)
+		{
+			// No bank data this session yet: nothing to timestamp.
+			snapshotHint.setVisible(false);
+			return;
+		}
+		final String prefix = showingSnapshot ? "Bank as of " : "Updated ";
+		snapshotHint.setToolTipText(showingSnapshot
+			? "The bank is closed, so these are the movers from the last time you opened your bank"
+				+ " this session - prices still update live."
+			: "When this list was last gathered from your open bank. It does not refresh in the"
+				+ " background; reopen your bank to update it.");
+		snapshotHint.setText(formatUpdatedHint(prefix, snapshotHintTime));
+		snapshotHint.setVisible(true);
+	}
+
+	/**
+	 * Builds the "last updated" line text: {@code prefix} followed by a locale/zone-aware time
+	 * (short time style; a short date prepended when the capture was not today). EDT only.
+	 */
+	private static String formatUpdatedHint(String prefix, Instant capturedAt)
+	{
+		final ZoneId zone = ZoneId.systemDefault();
+		final LocalDate capturedDate = capturedAt.atZone(zone).toLocalDate();
+		final boolean today = capturedDate.equals(LocalDate.now(zone));
+		final DateTimeFormatter formatter = (today
+			? DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
+			: DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT, FormatStyle.SHORT))
+			.withZone(zone);
+		return prefix + formatter.format(capturedAt);
+	}
+
+	/**
+	 * Renders the aggregate-movement summary line from {@link #trackedTotal} (computed on the client
+	 * thread). Hidden when there are no tracked rows; coloured green for a net gain, red for a net
+	 * loss, grey for ~zero, consistent with the row colouring. EDT only.
+	 */
+	private void updateTrackedSummary()
+	{
+		if (trackedSummary == null)
+		{
+			return;
+		}
+		if (rows.isEmpty())
+		{
+			trackedSummary.setVisible(false);
+			return;
+		}
+		final long gp = trackedTotal.getGpChange();
+		final StringBuilder text = new StringBuilder("Tracked: ")
+			.append(ItemValueFluctuationOverlay.formatSignedGp(gp));
+		if (trackedTotal.hasPercent())
+		{
+			text.append(" (")
+				.append(ItemValueFluctuationOverlay.formatPercent(trackedTotal.getPercentChange()))
+				.append(')');
+		}
+		trackedSummary.setText(text.toString());
+		trackedSummary.setForeground(gp > 0 ? GAIN_TEXT
+			: (gp < 0 ? LOSS_TEXT : ColorScheme.LIGHT_GRAY_COLOR));
+		trackedSummary.setVisible(true);
+	}
+
 	/** Updates the sort-direction button's glyph/tooltip to reflect the current direction. */
 	private void updateSortDirButton()
 	{
@@ -972,7 +1330,7 @@ class ItemValueFluctuationPanel extends PluginPanel
 	private static String signedGp(long gp)
 	{
 		final String sign = gp > 0 ? "+" : (gp < 0 ? "-" : "");
-		return sign + QuantityFormatter.formatNumber(Math.abs(gp)) + " gp";
+		return sign + QuantityFormatter.formatNumber(Math.abs(gp)) + " GP";
 	}
 
 	/**
@@ -1006,4 +1364,21 @@ class ItemValueFluctuationPanel extends PluginPanel
 		+ " cached for up to about 30 minutes.\n\n"
 		+ "Thin markets: if an item barely trades, a single unusual sale can swing its reported"
 		+ " price, so treat big moves on low-volume items with care.";
+
+	/**
+	 * One captured bank slot: the raw item id and quantity, exactly as read from the bank container
+	 * BEFORE any filtering/resolution. Immutable, Swing-free; written and read only on the client
+	 * thread inside {@link #rebuildOnClientThread}.
+	 */
+	private static final class BankSlot
+	{
+		private final int itemId;
+		private final int quantity;
+
+		private BankSlot(int itemId, int quantity)
+		{
+			this.itemId = itemId;
+			this.quantity = quantity;
+		}
+	}
 }

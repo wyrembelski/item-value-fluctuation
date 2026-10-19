@@ -11,7 +11,11 @@ import javax.inject.Inject;
 import javax.inject.Provider;
 import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.GameState;
+import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.events.WidgetClosed;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
@@ -163,6 +167,37 @@ public class ItemValueFluctuationPlugin extends Plugin
 		if (event.getContainerId() == InventoryID.BANK)
 		{
 			refreshPanel();
+		}
+	}
+
+	@Subscribe
+	public void onWidgetClosed(WidgetClosed event)
+	{
+		// Closing/walking away from the bank does NOT change the bank ItemContainer and produces no
+		// price update, so none of the other refresh triggers fire. Nudge the panel exactly once on
+		// the bank-close transition: rebuildOnClientThread then sees a null bank container, reuses
+		// the remembered snapshot (fromSnapshot=true) and flips the "last updated" line to its
+		// "Bank as of <time>" wording. One-shot per close (WidgetClosed fires once); NOT polling.
+		if (event.getGroupId() == InterfaceID.BANKMAIN)
+		{
+			refreshPanel();
+		}
+	}
+
+	@Subscribe
+	public void onGameStateChanged(GameStateChanged event)
+	{
+		// Drop the side panel's remembered bank snapshot when the player leaves the game world so it
+		// never persists across accounts/sessions. The snapshot is in-memory only and is rebuilt the
+		// next time the bank is opened.
+		final GameState state = event.getGameState();
+		if (state == GameState.LOGIN_SCREEN || state == GameState.HOPPING)
+		{
+			final ItemValueFluctuationPanel p = panel;
+			if (p != null)
+			{
+				p.clearBankSnapshot();
+			}
 		}
 	}
 

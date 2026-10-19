@@ -30,6 +30,7 @@ import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
+import net.runelite.client.util.QuantityFormatter;
 
 /**
  * Washes each bank slot with the heatmap colour for its item's price movement, and optionally
@@ -79,6 +80,15 @@ class ItemValueFluctuationOverlay extends Overlay
 	public Dimension render(Graphics2D graphics)
 	{
 		trackTimeFrame(config.timeFrame());
+
+		// Suppress ALL bank drawing (wash, label, stale fill, near-high sparkle, loading card) when
+		// the user turns highlights off. The side panel is unaffected: it gathers from the bank
+		// ItemContainer itself and only calls the pure helpers nearHighFor/movementColor, so gating
+		// the DRAW here does not touch the panel's data path.
+		if (!config.showBankHighlights())
+		{
+			return null;
+		}
 
 		final Widget container = client.getWidget(InterfaceID.Bankmain.ITEMS);
 		if (container == null || container.isHidden())
@@ -131,6 +141,14 @@ class ItemValueFluctuationOverlay extends Overlay
 					continue;
 				}
 
+				// Skip bank placeholders: an empty "remembered slot" left after withdrawing all of an
+				// item is NOT hidden and keeps a valid itemId, but its quantity is 0 - you don't own
+				// it, so it must not be coloured/counted (the count/prefetch path already skips these).
+				if (item.getItemQuantity() <= 0)
+				{
+					continue;
+				}
+
 				final Rectangle bounds = item.getBounds();
 				if (bounds == null || bounds.width <= 0 || bounds.height <= 0
 					|| !viewport.intersects(bounds))
@@ -155,8 +173,10 @@ class ItemValueFluctuationOverlay extends Overlay
 				final Color tier = colorScale.colorFor(f, quantity);
 				if (tier != null)
 				{
-					graphics.setColor(colorScale.withOverlayAlpha(tier));
-					graphics.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+					drawHighlight(graphics, bounds, colorScale.withOverlayAlpha(tier));
+					// Our highlight paints ABOVE_WIDGETS, covering the game's top-left stack count.
+					// Redraw it on top so stacked items (e.g. bolts) still show their quantity.
+					drawStackCount(graphics, bounds, quantity);
 
 					if (config.showPercentLabel())
 					{
@@ -414,6 +434,12 @@ class ItemValueFluctuationOverlay extends Overlay
 	/** Draws white text with a full 8-direction black outline so it reads on any fill colour. */
 	private static void drawOutlined(Graphics2D graphics, String text, int x, int y)
 	{
+		drawOutlined(graphics, text, x, y, Color.WHITE);
+	}
+
+	/** Draws {@code fill}-coloured text with a full 8-direction black outline so it reads on any fill. */
+	private static void drawOutlined(Graphics2D graphics, String text, int x, int y, Color fill)
+	{
 		graphics.setColor(Color.BLACK);
 		for (int dx = -1; dx <= 1; dx++)
 		{
@@ -425,8 +451,45 @@ class ItemValueFluctuationOverlay extends Overlay
 				}
 			}
 		}
-		graphics.setColor(Color.WHITE);
+		graphics.setColor(fill);
 		graphics.drawString(text, x, y);
+	}
+
+	/**
+	 * Redraws the game's native stack-count text in the slot's TOP-LEFT, on top of our highlight
+	 * fill/outline (which, painting {@code ABOVE_WIDGETS}, otherwise covers the number the game
+	 * drew underneath). Only for real stacks ({@code quantity > 1}). Matches the native look: the
+	 * abbreviated count via {@link QuantityFormatter#quantityToStackSize(long)} and OSRS's standard
+	 * stack-count colour tiers (yellow &lt; 100k, white &lt; 10m, green at/above 10m), reusing the
+	 * shared 8-direction outline so it reads on any fill.
+	 */
+	private static void drawStackCount(Graphics2D graphics, Rectangle bounds, int quantity)
+	{
+		if (quantity <= 1)
+		{
+			return;
+		}
+
+		final String text = QuantityFormatter.quantityToStackSize(quantity);
+		final Color fill;
+		if (quantity < 100_000)
+		{
+			fill = new Color(255, 255, 0); // yellow
+		}
+		else if (quantity < 10_000_000)
+		{
+			fill = Color.WHITE;
+		}
+		else
+		{
+			fill = new Color(0, 255, 128); // green
+		}
+
+		// Top-left of the slot, a few px in, with the baseline dropped by the font ascent so the
+		// glyphs sit just inside the top edge like the game's own count.
+		final int x = bounds.x + 1;
+		final int y = bounds.y + graphics.getFontMetrics().getAscent();
+		drawOutlined(graphics, text, x, y, fill);
 	}
 
 	/**
@@ -554,9 +617,91 @@ class ItemValueFluctuationOverlay extends Overlay
 		final Color tier = colorScale.colorFor(stale, quantity);
 		if (tier != null)
 		{
-			graphics.setColor(colorScale.dimmed(tier));
-			graphics.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+			drawHighlight(graphics, bounds, colorScale.dimmed(tier));
+			// Stale fill also covers the game's native stack count; redraw it on top.
+			drawStackCount(graphics, bounds, quantity);
 		}
+	}
+
+	/**
+	 * Draws the slot highlight in the configured {@link HighlightStyle}, shared by BOTH the live
+	 * fill and the dimmed stale fill so the three styles behave identically in active and stale
+	 * states. {@code color} is ALREADY the opacity-routed tier colour (via
+	 * {@link ColorScale#withOverlayAlpha(Color)} / {@link ColorScale#dimmed(Color)}); this helper
+	 * never reads {@code config.overlayOpacity()}, so opacity stays single-sourced in
+	 * {@link ColorScale}. Any secondary alphas (glow, inner wash) are derived by scaling the alpha
+	 * of the colour it is handed.
+	 */
+	private void drawHighlight(Graphics2D graphics, Rectangle bounds, Color color)
+	{
+		if (config.highlightStyle() == HighlightStyle.OUTLINE)
+		{
+			drawOutlineHighlight(graphics, bounds, color);
+			return;
+		}
+
+		// SQUARE: the original filled wash.
+		graphics.setColor(color);
+		graphics.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+	}
+
+	/**
+	 * The OUTLINE style: a thick, bright, GLOWING border in the tier colour hugging the slot, very
+	 * noticeable. Reuses the antialias + {@link BasicStroke} + saved/restored stroke idiom from
+	 * {@link #drawSparkle}: a faint inner wash, a wide low-alpha outer glow stroke, then a crisp
+	 * brightened inner border. Alpha is scaled from the handed colour so opacity still flows from
+	 * {@link ColorScale}.
+	 */
+	private void drawOutlineHighlight(Graphics2D graphics, Rectangle bounds, Color color)
+	{
+		final int baseAlpha = color.getAlpha();
+		final int thickness = config.outlineThickness();
+
+		final Object aa = graphics.getRenderingHint(RenderingHints.KEY_ANTIALIASING);
+		graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+			RenderingHints.VALUE_ANTIALIAS_ON);
+		final Stroke originalStroke = graphics.getStroke();
+
+		// (1) Subtle inner wash so a strong mover still reads as "filled" at a glance.
+		graphics.setColor(scaleAlpha(color, 0.25f));
+		graphics.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+
+		// (2) Wide, low-alpha outer glow stroke.
+		final int inset = Math.max(1, Math.round(thickness / 2f));
+		final int x = bounds.x + inset;
+		final int y = bounds.y + inset;
+		final int w = bounds.width - 2 * inset - 1;
+		final int h = bounds.height - 2 * inset - 1;
+		graphics.setColor(scaleAlpha(color, 0.4f));
+		graphics.setStroke(new BasicStroke(thickness + 3f));
+		graphics.drawRoundRect(x, y, w, h, 6, 6);
+
+		// (3) Crisp, brightened inner border (bumped toward white so it reads as "glowing").
+		graphics.setColor(brighten(color, baseAlpha));
+		graphics.setStroke(new BasicStroke(thickness));
+		graphics.drawRoundRect(x, y, w, h, 6, 6);
+
+		graphics.setStroke(originalStroke);
+		if (aa != null)
+		{
+			graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, aa);
+		}
+	}
+
+	/** A copy of {@code color} with its alpha scaled by {@code factor} (0-1), clamped to 0-255. */
+	private static Color scaleAlpha(Color color, float factor)
+	{
+		final int alpha = Math.max(0, Math.min(255, Math.round(color.getAlpha() * factor)));
+		return new Color(color.getRed(), color.getGreen(), color.getBlue(), alpha);
+	}
+
+	/** A copy of {@code color} nudged toward white (so the border "glows"), keeping {@code alpha}. */
+	private static Color brighten(Color color, int alpha)
+	{
+		final int r = color.getRed() + (255 - color.getRed()) / 3;
+		final int g = color.getGreen() + (255 - color.getGreen()) / 3;
+		final int b = color.getBlue() + (255 - color.getBlue()) / 3;
+		return new Color(r, g, b, Math.max(0, Math.min(255, alpha)));
 	}
 
 	/**

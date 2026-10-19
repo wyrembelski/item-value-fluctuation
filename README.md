@@ -19,7 +19,7 @@ or crashed (maybe worth holding, maybe worth dumping).
 - **Price-movement heatmap** over your whole bank — green for gains, red for losses, deeper colour
   for bigger moves.
 - **Choose your window** — from the last 6 hours up to a full year.
-- **Per-slot labels** showing the percent change, per-item gp, or whole-stack gp.
+- **Per-slot labels** showing the percent change, per-item GP, or whole-stack GP.
 - **Hover tooltips** with the full breakdown: current price, start-of-window price, percent change,
   and the high/low over the window.
 - **Movers side panel** — a sortable, filterable list of your biggest gainers and losers, so you
@@ -41,7 +41,7 @@ Open the RuneLite client, go to the **Plugin Hub** (the wrench/configuration pan
 - Each highlighted bank slot gets a translucent colour wash, an optional label, and a hover tooltip
   with the current price, the price at the start of the window, the percent change, and the high
   and low seen within the window.
-- The slot label can show the percent change, the per-item gp change, or the whole stack's gp
+- The slot label can show the percent change, the per-item GP change, or the whole stack's GP
   change (shortened as K/M/B), whichever you prefer.
 
 ![Hover tooltip with the full price breakdown](images/tooltip.png)
@@ -51,9 +51,9 @@ Open the RuneLite client, go to the **Plugin Hub** (the wrench/configuration pan
 A sidebar panel gives you the same information as a ranked list, which is handy when you want to
 scan movers without hunting across the bank grid.
 
-- **Sort** by percent change, gp change, item value, or name.
+- **Sort** by percent change, GP change, item value, or name.
 - **Filter** to show everything, only gainers, only losers, or only items near their 1-year high.
-- Each row shows the item, its percent move, gp change, and current price; click a row for a detail
+- Each row shows the item, its percent move, GP change, and current price; click a row for a detail
   card, and use the **?** header for a quick explanation of how values are worked out.
 - A compact quick-settings strip lets you change the time frame and toggle the near-high orb
   without opening the full settings page.
@@ -89,7 +89,7 @@ crimson (≥50%, a collapse).
 
 You can switch between showing gains only, losses only, or both, and every threshold and colour is
 configurable. Three filters keep the bank from turning into noise: a minimum per-item value, a
-minimum total stack value, and a minimum gp swing — so a big percent move on a cheap item or a tiny
+minimum total stack value, and a minimum GP swing — so a big percent move on a cheap item or a tiny
 stack is ignored.
 
 ## Near 1-year high orb (optional)
@@ -107,7 +107,7 @@ colour at all.
   high.
 
 The orb uses the same per-item and total-value filters as the heatmap (it will not mark items that
-fail those), but ignores the minimum-gp-swing filter and the gains/losses mode. It always uses the
+fail those), but ignores the minimum-GP-swing filter and the gains/losses mode. It always uses the
 1-year price history regardless of which movement time frame you have selected.
 
 Note: the wiki price history only goes back one year, so this is a **1-year high, not an all-time
@@ -156,7 +156,7 @@ The details, so the numbers aren't a mystery:
 
 - **Thinly-traded items can be noisy.** If an item barely trades, a single unusual sale can swing
   its reported price, so a large percent move may reflect one odd transaction rather than a real
-  market trend. The minimum-gp-swing filter helps, but treat big moves on low-volume items with
+  market trend. The minimum-GP-swing filter helps, but treat big moves on low-volume items with
   care.
 - **History is cached (up to ~30 minutes).** The current price is live, but the "start of window"
   anchor can be a little stale. This is unnoticeable for day/week/month windows and only matters on
@@ -174,11 +174,11 @@ Everything has a sensible default, so the plugin works out of the box. The main 
 |---|---|---|
 | Time frame | The window price movement is measured over (6h → 1y) | Week |
 | Highlight mode | Show gains only, losses only, or both | Both |
-| Label content | Percent, per-item gp, or whole-stack gp on each slot | Percent |
+| Label content | Percent, per-item GP, or whole-stack GP on each slot | Percent |
 | Overlay opacity | How strong the colour wash is | 55% |
-| Min item value | Hide items worth less than this each | 1,000 gp |
-| Min total value | Hide stacks worth less than this in total | 500,000 gp |
-| Min gp swing | Hide moves smaller than this per item | 50 gp |
+| Min item value | Hide items worth less than this each | 1,000 GP |
+| Min total value | Hide stacks worth less than this in total | 500,000 GP |
+| Min GP swing | Hide moves smaller than this per item | 50 GP |
 | Gain / loss colours & thresholds | Every tier colour and the percent it triggers at | Tuned defaults |
 | Near 1-year high orb | Mark items at/near their yearly peak | Off |
 | Near-high threshold | How close to the yearly high counts as "near" | 5% |
@@ -194,6 +194,21 @@ gains, losses, and year-high sections.
 This plugin never moves, sorts, or reorders your bank — item order is controlled by the game. It
 only paints colour over the slots the game already laid out. It injects no input and sends no
 actions to the server.
+
+## Changelog
+
+### 1.1
+- **Side panel stays up after you leave the bank** — keep an eye on your movers while skilling.
+  Shows when it was last refreshed ("Updated …" live, "Bank as of …" once you walk away), and
+  resets on logout.
+- **New Outline highlight style, now the default** — a bright glowing border instead of a filled
+  square, so you can still see what each item is. Adjustable thickness. The filled square is still
+  available if you prefer it.
+- **Stack counts stay readable** — item quantities are drawn on top of the highlight.
+- **Show/hide bank highlights toggle** — don't want your bank coloured? Turn it off and still use
+  the side panel.
+- **"Tracked" total line** — the combined movement of the items currently shown.
+- **"View on Wiki" link** on an item's detail view — opens its OSRS Wiki page for the full history.
 
 ## Licence
 

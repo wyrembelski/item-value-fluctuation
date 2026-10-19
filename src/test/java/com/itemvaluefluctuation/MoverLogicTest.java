@@ -160,4 +160,58 @@ public class MoverLogicTest
 		copy.sort(MoverSort.comparator(MoverSort.Mode.PERCENT_DESC, true));
 		assertEquals(Arrays.asList(5, 4, 3, 2, 1), ids(copy));
 	}
+
+	@Test
+	public void totalMovementSumsWholeStackGpAndIsValueWeighted()
+	{
+		// Two rows:
+		//   A: current 1_100, gpChange +100/item, qty 10 -> anchor 1_000/item.
+		//      stack gp = +1_000, anchor stack = 10_000.
+		//   B: current 900, gpChange -100/item, qty 1 -> anchor 1_000/item.
+		//      stack gp = -100, anchor stack = 1_000.
+		// Total gp = +900. Total anchor = 11_000. Value-weighted % = 900/11000*100 ~= 8.18%,
+		// which is NOT the average of per-item % (+10% and -10% would average to 0).
+		final PanelRowData a = row(1, "A", 10, 1_100, 10.0, 100, NearHighLevel.NONE);
+		final PanelRowData b = row(2, "B", 1, 900, -10.0, -100, NearHighLevel.NONE);
+		final MoverSort.TotalMovement total =
+			MoverSort.totalMovement(Arrays.asList(a, b));
+		assertEquals(900L, total.getGpChange());
+		assertEquals(true, total.hasPercent());
+		assertEquals(900d * 100d / 11_000d, total.getPercentChange(), 1e-9);
+	}
+
+	@Test
+	public void totalMovementIsLongSafe()
+	{
+		// A whole-stack gp swing that overflows a 32-bit int: current 3_000_000_000, qty 1,
+		// gpChange +2_000_000_000/item (anchor 1_000_000_000). Sum must stay a long.
+		final PanelRowData huge =
+			row(1, "Huge", 1, 3_000_000_000L, 200.0, 2_000_000_000L, NearHighLevel.NONE);
+		final MoverSort.TotalMovement total =
+			MoverSort.totalMovement(Collections.singletonList(huge));
+		assertEquals(2_000_000_000L, total.getGpChange());
+		assertEquals(true, total.hasPercent());
+		assertEquals(200d, total.getPercentChange(), 1e-9);
+	}
+
+	@Test
+	public void totalMovementEmptyListIsZeroWithNoPercent()
+	{
+		final MoverSort.TotalMovement total =
+			MoverSort.totalMovement(Collections.<PanelRowData>emptyList());
+		assertEquals(0L, total.getGpChange());
+		assertEquals(false, total.hasPercent());
+	}
+
+	@Test
+	public void totalMovementGuardsAgainstZeroAnchor()
+	{
+		// anchor = current - gpChange = 0 - 0 = 0, so total anchor is non-positive: no percent,
+		// gp still reported.
+		final PanelRowData zeroAnchor = row(1, "Zero", 1, 0, 0.0, 0, NearHighLevel.NONE);
+		final MoverSort.TotalMovement total =
+			MoverSort.totalMovement(Collections.singletonList(zeroAnchor));
+		assertEquals(0L, total.getGpChange());
+		assertEquals(false, total.hasPercent());
+	}
 }
