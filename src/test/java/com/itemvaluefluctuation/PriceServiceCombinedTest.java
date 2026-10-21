@@ -182,6 +182,39 @@ public class PriceServiceCombinedTest
 		assertEquals(0.0, zeroAnchor.getPercentChange(), 0.0001);
 	}
 
+	/**
+	 * End-to-end proof of the ornament-kit fix: the Soul reaper axe (or) is resolved by the real
+	 * {@link ItemResolver} to its tradeable base + ornament kit, and {@link #getCachedCombined}
+	 * returns a NON-null combined price when {@code /latest} + history are seeded for those
+	 * component ids but NOT for the untradeable (or) id. Before the fix the item resolved to its own
+	 * (or) id (absent from {@code /latest}) and {@code getCachedCombined} returned null, so the item
+	 * was silently skipped.
+	 */
+	@Test
+	public void soulReaperAxeOrnHasNonNullCombinedPrice() throws Exception
+	{
+		final ItemResolver resolver = new ItemResolver(null);
+		final List<Component> components = resolver.resolveCanonical(ItemID.SOULREAPER_AXE_ORN);
+		// Sanity: resolved to tradeable base + kit, never the untradeable (or) id.
+		assertEquals(2, components.size());
+
+		// Seed only the TRADEABLE component ids (the (or) id is deliberately never seeded).
+		api.setLatest(ItemID.SOULREAPER, 9_000_000L);
+		api.setLatest(ItemID.DEMONIC_AXE_ORNAMENT_KIT, 50_000L);
+		api.setTimeseries(ItemID.SOULREAPER, 8_000_000L, 9_500_000L);
+		api.setTimeseries(ItemID.DEMONIC_AXE_ORNAMENT_KIT, 45_000L, 55_000L);
+		seed(ItemID.SOULREAPER);
+		seed(ItemID.DEMONIC_AXE_ORNAMENT_KIT);
+
+		final PriceFluctuation f = service.getCachedCombined(ItemID.SOULREAPER_AXE_ORN,
+			components, TimeFrame.DAY);
+		assertNotNull(f);
+		assertEquals(ItemID.SOULREAPER_AXE_ORN, f.getItemId());
+		// current = 9,000,000 + 50,000; anchor = 8,000,000 + 45,000.
+		assertEquals(9_050_000L, f.getCurrentPrice());
+		assertEquals(8_045_000L, f.getAnchorPrice());
+	}
+
 	/** Coins/platinum use their fixed gp value and never touch /latest or /timeseries. */
 	@Test
 	public void fixedPriceCoinsAndPlatinum()

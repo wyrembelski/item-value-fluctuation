@@ -323,6 +323,19 @@ public interface ItemValueFluctuationConfig extends Config
 		return 50;
 	}
 
+	@ConfigItem(
+		keyName = "includePlaceholders",
+		name = "Include placeholders",
+		description = "Include bank placeholder slots (the empty 'remembered' slots left after you"
+			+ " withdraw all of an item). Off by default, since you don't actually own them.",
+		section = filterSection,
+		position = 3
+	)
+	default boolean includePlaceholders()
+	{
+		return false;
+	}
+
 	// ------------------------------------------------------------------
 	// Gains ramp
 	// ------------------------------------------------------------------

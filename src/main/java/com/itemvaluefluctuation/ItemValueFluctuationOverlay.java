@@ -141,10 +141,11 @@ class ItemValueFluctuationOverlay extends Overlay
 					continue;
 				}
 
-				// Skip bank placeholders: an empty "remembered slot" left after withdrawing all of an
-				// item is NOT hidden and keeps a valid itemId, but its quantity is 0 - you don't own
-				// it, so it must not be coloured/counted (the count/prefetch path already skips these).
-				if (item.getItemQuantity() <= 0)
+				// Skip bank placeholders unless the user opts in: an empty "remembered slot" left
+				// after withdrawing all of an item keeps a valid itemId and is NOT hidden, so quantity
+				// alone is unreliable. The authoritative signal is the item composition's placeholder
+				// template id (-1 means a real item; anything else is a placeholder you don't own).
+				if (!config.includePlaceholders() && isPlaceholder(item.getItemId()))
 				{
 					continue;
 				}
@@ -249,7 +250,11 @@ class ItemValueFluctuationOverlay extends Overlay
 			final int quantity = item.getQuantity();
 			if (itemId <= 0 || quantity <= 0)
 			{
-				continue; // empty slot / placeholder
+				continue; // empty slot
+			}
+			if (!config.includePlaceholders() && isPlaceholder(itemId))
+			{
+				continue; // placeholder the user does not actually own
 			}
 
 			// Resolve to tradeable components. Pure currency (coins/platinum) is never a market
@@ -453,6 +458,18 @@ class ItemValueFluctuationOverlay extends Overlay
 		}
 		graphics.setColor(fill);
 		graphics.drawString(text, x, y);
+	}
+
+	/**
+	 * Whether an item id is a bank placeholder (an empty "remembered" slot left after withdrawing
+	 * all of an item). The authoritative signal is the item composition's placeholder template id:
+	 * a real item returns -1, a placeholder returns a non-negative template id. This is more
+	 * reliable than the slot quantity, which is not consistently 0 across the bank's widget views.
+	 */
+	private boolean isPlaceholder(int itemId)
+	{
+		final ItemComposition comp = itemManager.getItemComposition(itemId);
+		return comp != null && comp.getPlaceholderTemplateId() != -1;
 	}
 
 	/**

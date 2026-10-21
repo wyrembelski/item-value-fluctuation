@@ -104,8 +104,9 @@ class ItemValueFluctuationTooltipOverlay extends Overlay
 				continue;
 			}
 
-			// Skip bank placeholders (empty remembered slots, quantity 0): not owned, so no tooltip.
-			if (item.getItemQuantity() <= 0)
+			// Skip bank placeholders (empty remembered slots you don't own) unless the user opts in.
+			// Use the composition's placeholder template id, not quantity, which is unreliable here.
+			if (!config.includePlaceholders() && isPlaceholder(item.getItemId()))
 			{
 				continue;
 			}
@@ -351,6 +352,17 @@ class ItemValueFluctuationTooltipOverlay extends Overlay
 		final ItemComposition comp = itemManager.getItemComposition(only.getTradeableId());
 		final String name = comp != null ? comp.getName() : "item " + only.getTradeableId();
 		return "Priced as: " + name;
+	}
+
+	/**
+	 * Whether an item id is a bank placeholder (empty "remembered" slot). A real item's composition
+	 * returns a placeholder template id of -1; a placeholder returns a non-negative value. More
+	 * reliable than slot quantity, which is not consistently 0 across the bank's widget views.
+	 */
+	private boolean isPlaceholder(int itemId)
+	{
+		final ItemComposition comp = itemManager.getItemComposition(itemId);
+		return comp != null && comp.getPlaceholderTemplateId() != -1;
 	}
 
 	private static String signedGp(long gp)

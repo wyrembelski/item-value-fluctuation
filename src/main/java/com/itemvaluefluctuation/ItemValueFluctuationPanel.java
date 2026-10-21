@@ -112,6 +112,7 @@ class ItemValueFluctuationPanel extends PluginPanel
 	private JComboBox<TimeFrame> timeFrameCombo;
 	private JCheckBox ringToggle;
 	private JCheckBox highlightsToggle;
+	private JCheckBox placeholdersToggle;
 	private JButton sortDirButton;
 
 	/** Sort direction: true = natural (descending for the gp/%/value modes), false = reversed. */
@@ -348,6 +349,7 @@ class ItemValueFluctuationPanel extends PluginPanel
 		timeFrameCombo = new JComboBox<>(TimeFrame.values());
 		ringToggle = new JCheckBox();
 		highlightsToggle = new JCheckBox();
+		placeholdersToggle = new JCheckBox();
 		sortDirButton = new JButton();
 		listView = new JPanel(new BorderLayout());
 		listContainer = new JPanel();
@@ -447,6 +449,10 @@ class ItemValueFluctuationPanel extends PluginPanel
 				if (itemId <= 0 || quantity <= 0)
 				{
 					continue;
+				}
+				if (!config.includePlaceholders() && isPlaceholder(itemId))
+				{
+					continue; // placeholder the user does not actually own
 				}
 				captured.add(new BankSlot(itemId, quantity));
 			}
@@ -611,6 +617,17 @@ class ItemValueFluctuationPanel extends PluginPanel
 	}
 
 	/**
+	 * Whether an item id is a bank placeholder (empty "remembered" slot). A real item's composition
+	 * returns a placeholder template id of -1; a placeholder returns a non-negative value. Client
+	 * thread only (called from the snapshot capture in {@link #rebuildOnClientThread}).
+	 */
+	private boolean isPlaceholder(int itemId)
+	{
+		final ItemComposition comp = itemManager.getItemComposition(itemId);
+		return comp != null && comp.getPlaceholderTemplateId() != -1;
+	}
+
+	/**
 	 * The display name of a single remapped component (e.g. a degraded/combined item priced as its
 	 * tradeable base), or {@code null} for a plain tradeable item or a multi-component item.
 	 */
@@ -731,6 +748,26 @@ class ItemValueFluctuationPanel extends PluginPanel
 			refresh();
 		});
 
+		// Include-placeholders quick-toggle: whether empty "remembered" bank slots (items you no
+		// longer own) are shown. Off by default. Writes the same config key the wrench panel uses.
+		placeholdersToggle.setText("Include placeholders");
+		placeholdersToggle.setSelected(config.includePlaceholders());
+		placeholdersToggle.setFocusable(false);
+		placeholdersToggle.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		placeholdersToggle.setForeground(Color.WHITE);
+		placeholdersToggle.setFont(FontManager.getRunescapeSmallFont());
+		placeholdersToggle.setAlignmentX(LEFT_ALIGNMENT);
+		placeholdersToggle.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR),
+			BorderFactory.createEmptyBorder(3, 4, 3, 4)));
+		placeholdersToggle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+		placeholdersToggle.addActionListener(e ->
+		{
+			configManager.setConfiguration(ItemValueFluctuationConfig.CONFIG_GROUP,
+				"includePlaceholders", placeholdersToggle.isSelected());
+			refresh();
+		});
+
 		// One tidy vertical stack of labeled rows: label on its own line, full-width control under
 		// it, uniform gaps. Nothing truncates in the narrow (~225px) panel.
 		controls.add(trackedSummary);
@@ -744,6 +781,8 @@ class ItemValueFluctuationPanel extends PluginPanel
 		controls.add(ringToggle);
 		controls.add(verticalGap());
 		controls.add(highlightsToggle);
+		controls.add(verticalGap());
+		controls.add(placeholdersToggle);
 		controls.add(verticalGap());
 		controls.add(snapshotHint);
 
@@ -858,6 +897,10 @@ class ItemValueFluctuationPanel extends PluginPanel
 		if (ringToggle.isSelected() != config.highlightNearYearHigh())
 		{
 			ringToggle.setSelected(config.highlightNearYearHigh());
+		}
+		if (placeholdersToggle.isSelected() != config.includePlaceholders())
+		{
+			placeholdersToggle.setSelected(config.includePlaceholders());
 		}
 		if (highlightsToggle.isSelected() != config.showBankHighlights())
 		{

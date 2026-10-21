@@ -23,3 +23,7 @@ Thumbs.db
 # Agent workflow scratch artifacts
 .agents/
 build-output.txt
+
+# Internal review/workflow artifacts (must never ship to the public repo)
+semantic-review/
+.agents/

@@ -197,6 +197,14 @@ actions to the server.
 
 ## Changelog
 
+### 1.2
+- **Fixed ornament-kitted items not being tracked.** Items with an ornament kit applied — e.g.
+  Amulet of fury (or), Soul reaper axe (or), godsword and dragon kits — were previously skipped
+  entirely. They are now priced from their combined parts (the base item plus the kit).
+- **Added an "Include placeholders" toggle** (off by default). Empty bank placeholder slots for
+  items you no longer own are excluded by default, so they don't clutter the view or get counted.
+  The toggle is available both in the settings and in the side panel.
+
 ### 1.1
 - **Side panel stays up after you leave the bank** — keep an eye on your movers while skilling.
   Shows when it was last refreshed ("Updated …" live, "Bank as of …" once you walk away), and
