@@ -10,6 +10,7 @@ import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.ConfigSection;
+import net.runelite.client.config.Keybind;
 import net.runelite.client.config.Range;
 import net.runelite.client.config.Units;
 
@@ -142,6 +143,44 @@ public interface ItemValueFluctuationConfig extends Config
 	default int outlineThickness()
 	{
 		return 2;
+	}
+
+	// ------------------------------------------------------------------
+	// Visibility (reveal/hide the bank highlights on demand with a hotkey)
+	// ------------------------------------------------------------------
+	@ConfigSection(
+		name = "Visibility",
+		description = "Optionally bind a hotkey that reveals or hides the bank highlights on"
+			+ " demand, so you can keep the plugin on but only colour the bank when you want",
+		position = 5
+	)
+	String visibilitySection = "visibility";
+
+	@ConfigItem(
+		keyName = "visibilityHotkey",
+		name = "Visibility hotkey",
+		description = "A key that controls whether the bank highlights are shown. Leave unbound to"
+			+ " always show them (the default). The side panel is never affected.",
+		section = visibilitySection,
+		position = 0
+	)
+	default Keybind visibilityHotkey()
+	{
+		return Keybind.NOT_SET;
+	}
+
+	@ConfigItem(
+		keyName = "visibilityMode",
+		name = "Visibility mode",
+		description = "How the hotkey behaves (only applies when a key is bound): Toggle taps the"
+			+ " key to switch the highlights on/off; Hold to show reveals them only while held;"
+			+ " Hold to hide hides them only while held.",
+		section = visibilitySection,
+		position = 1
+	)
+	default VisibilityMode visibilityMode()
+	{
+		return VisibilityMode.TOGGLE;
 	}
 
 	// ------------------------------------------------------------------

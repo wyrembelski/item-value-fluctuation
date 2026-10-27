@@ -6,6 +6,7 @@ package com.itemvaluefluctuation;
 
 import com.google.inject.Provides;
 import java.awt.image.BufferedImage;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.inject.Inject;
 import javax.inject.Provider;
@@ -19,12 +20,16 @@ import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
+import net.runelite.client.config.Keybind;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.ConfigChanged;
+import net.runelite.client.input.KeyManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
+import net.runelite.client.util.HotkeyListener;
 import net.runelite.client.util.ImageUtil;
 
 @Slf4j
@@ -56,6 +61,52 @@ public class ItemValueFluctuationPlugin extends Plugin
 
 	@Inject
 	private ClientToolbar clientToolbar;
+
+	@Inject
+	private KeyManager keyManager;
+
+	/**
+	 * The latched TOGGLE state. Only meaningful in {@link VisibilityMode#TOGGLE}. Mutated on the
+	 * AWT/EDT thread by {@link #visibilityListener} and read on the client thread by the overlays,
+	 * so it is an {@link AtomicBoolean} for safe cross-thread publication. Session-only: reset to
+	 * shown on login/startup and on a mode change; never persisted across logins.
+	 */
+	private final AtomicBoolean toggleOn = new AtomicBoolean(true);
+
+	/**
+	 * Whether the visibility hotkey is currently held down. Used only by the hold modes. Mutated on
+	 * the AWT/EDT thread by {@link #visibilityListener}, read on the client thread by the overlays.
+	 */
+	private final AtomicBoolean keyHeld = new AtomicBoolean(false);
+
+	/**
+	 * The single bindable visibility key. {@link HotkeyListener} does nothing while the bound key is
+	 * {@link net.runelite.client.config.Keybind#NOT_SET}, so the feature is inert when unbound.
+	 * {@code hotkeyPressed()}/{@code hotkeyReleased()} run on the AWT/EDT thread and only mutate the
+	 * two {@link AtomicBoolean} flags above — they never touch the client or config directly.
+	 */
+	private final HotkeyListener visibilityListener =
+		new HotkeyListener(() -> config.visibilityHotkey())
+		{
+			@Override
+			public void hotkeyPressed()
+			{
+				if (config.visibilityMode() == VisibilityMode.TOGGLE)
+				{
+					toggleOn.set(!toggleOn.get());
+				}
+				else
+				{
+					keyHeld.set(true);
+				}
+			}
+
+			@Override
+			public void hotkeyReleased()
+			{
+				keyHeld.set(false);
+			}
+		};
 
 	/**
 	 * The panel is a Swing {@link javax.swing.JComponent}; its construction must happen on the EDT.
@@ -95,6 +146,12 @@ public class ItemValueFluctuationPlugin extends Plugin
 		priceService.setUpdateListener(() -> clientThread.invoke(this::refreshPanel));
 		overlayManager.add(overlay);
 		overlayManager.add(tooltipOverlay);
+
+		// Start each session in the right visibility state for the selected mode (shown for TOGGLE
+		// and HOLD_TO_HIDE, hidden for HOLD_TO_SHOW) and register the single bindable key. The
+		// listener is inert while the key is NOT_SET, so the default (unbound) behaves as before.
+		resetVisibilityState();
+		keyManager.registerKeyListener(visibilityListener);
 
 		// The icon is not Swing, so it is safe to load here off the EDT.
 		final BufferedImage icon = ImageUtil.loadImageResource(
@@ -152,6 +209,7 @@ public class ItemValueFluctuationPlugin extends Plugin
 				p.teardown();
 			}
 		});
+		keyManager.unregisterKeyListener(visibilityListener);
 		overlayManager.remove(overlay);
 		overlayManager.remove(tooltipOverlay);
 		// The cache is deliberately NOT cleared on a time frame change (the overlay dims the
@@ -198,7 +256,51 @@ public class ItemValueFluctuationPlugin extends Plugin
 			{
 				p.clearBankSnapshot();
 			}
+			// The TOGGLE state is session-only (consistent with the plugin's no-cross-session
+			// stance): a new session always starts with the highlights in their mode's default
+			// state rather than inheriting a hidden toggle from a previous login.
+			resetVisibilityState();
 		}
+	}
+
+	@Subscribe
+	public void onConfigChanged(ConfigChanged event)
+	{
+		if (!ItemValueFluctuationConfig.CONFIG_GROUP.equals(event.getGroup()))
+		{
+			return;
+		}
+		// Re-initialise the visibility state whenever the mode or the bound key changes, so
+		// switching to HOLD_TO_SHOW resets to hidden, TOGGLE/HOLD_TO_HIDE reset to shown, and
+		// binding/clearing the key lands on a sane state (a held-key flag can't linger either).
+		if ("visibilityMode".equals(event.getKey()) || "visibilityHotkey".equals(event.getKey()))
+		{
+			resetVisibilityState();
+		}
+	}
+
+	/**
+	 * Resets the session visibility flags for the currently-selected mode: the toggle latch to its
+	 * mode default (shown for TOGGLE/HOLD_TO_HIDE, hidden for HOLD_TO_SHOW) and the key-held flag to
+	 * false. Called on startUp, on login/hop, and on a visibility config change.
+	 */
+	private void resetVisibilityState()
+	{
+		toggleOn.set(VisibilityState.initialToggleOn(config.visibilityMode()));
+		keyHeld.set(false);
+	}
+
+	/**
+	 * The single source of truth for whether the BANK overlay/tooltip should paint right now, read
+	 * by both {@link ItemValueFluctuationOverlay} and {@link ItemValueFluctuationTooltipOverlay} so
+	 * they can never diverge. The side panel does NOT read this. Safe to call from the client thread
+	 * (it only reads volatile/atomic flags and config).
+	 */
+	boolean isBankOverlayVisible()
+	{
+		final boolean keyBound = config.visibilityHotkey() != Keybind.NOT_SET;
+		return VisibilityState.shouldShow(config.visibilityMode(), keyBound, keyHeld.get(),
+			toggleOn.get());
 	}
 
 	/** Nudges the panel if it has been resolved. {@code refresh()} is itself thread-safe. */

@@ -57,6 +57,7 @@ class ItemValueFluctuationOverlay extends Overlay
 	private final ItemResolver itemResolver;
 	private final ItemManager itemManager;
 	private final ColorScale colorScale;
+	private final ItemValueFluctuationPlugin plugin;
 
 	/** Time frame seen on the last render, and the one before it (for dimmed stale colours). */
 	private TimeFrame lastTimeFrame;
@@ -64,13 +65,15 @@ class ItemValueFluctuationOverlay extends Overlay
 
 	@Inject
 	ItemValueFluctuationOverlay(Client client, ItemValueFluctuationConfig config,
-		PriceService priceService, ItemResolver itemResolver, ItemManager itemManager)
+		PriceService priceService, ItemResolver itemResolver, ItemManager itemManager,
+		ItemValueFluctuationPlugin plugin)
 	{
 		this.client = client;
 		this.config = config;
 		this.priceService = priceService;
 		this.itemResolver = itemResolver;
 		this.itemManager = itemManager;
+		this.plugin = plugin;
 		this.colorScale = new ColorScale(config);
 		setPosition(OverlayPosition.DYNAMIC);
 		setLayer(OverlayLayer.ABOVE_WIDGETS);
@@ -79,6 +82,15 @@ class ItemValueFluctuationOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
+		// Visibility hotkey gate: when the key is bound and the current mode says "hidden", paint
+		// nothing. Inert (always visible) when no key is bound. A dumb, fast read of the plugin's
+		// single visibility source of truth, before any viewport/clip work. The side panel is not
+		// affected (it never reads this flag).
+		if (!plugin.isBankOverlayVisible())
+		{
+			return null;
+		}
+
 		trackTimeFrame(config.timeFrame());
 
 		// Suppress ALL bank drawing (wash, label, stale fill, near-high sparkle, loading card) when

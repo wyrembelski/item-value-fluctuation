@@ -43,11 +43,12 @@ class ItemValueFluctuationTooltipOverlay extends Overlay
 	private final ItemResolver itemResolver;
 	private final TooltipManager tooltipManager;
 	private final ColorScale colorScale;
+	private final ItemValueFluctuationPlugin plugin;
 
 	@Inject
 	ItemValueFluctuationTooltipOverlay(Client client, ItemValueFluctuationConfig config,
 		PriceService priceService, ItemManager itemManager, ItemResolver itemResolver,
-		TooltipManager tooltipManager)
+		TooltipManager tooltipManager, ItemValueFluctuationPlugin plugin)
 	{
 		this.client = client;
 		this.config = config;
@@ -55,6 +56,7 @@ class ItemValueFluctuationTooltipOverlay extends Overlay
 		this.itemManager = itemManager;
 		this.itemResolver = itemResolver;
 		this.tooltipManager = tooltipManager;
+		this.plugin = plugin;
 		this.colorScale = new ColorScale(config);
 		setPosition(OverlayPosition.DYNAMIC);
 		setLayer(OverlayLayer.ABOVE_WIDGETS);
@@ -63,6 +65,14 @@ class ItemValueFluctuationTooltipOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
+		// Visibility hotkey gate: the hover tooltip is part of the bank overlay, so it follows the
+		// same reveal/hide flag as the slot highlights (single source of truth on the plugin).
+		// Inert when no key is bound; the side panel is unaffected.
+		if (!plugin.isBankOverlayVisible())
+		{
+			return null;
+		}
+
 		if (!config.showTooltip())
 		{
 			return null;

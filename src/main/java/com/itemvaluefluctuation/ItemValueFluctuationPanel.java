@@ -730,7 +730,7 @@ class ItemValueFluctuationPanel extends PluginPanel
 
 		// Bank-highlights on/off: colour the bank slots or not. The side panel stays fully
 		// populated either way (it gathers independently of the overlay's drawing).
-		highlightsToggle.setText("Colour bank slots");
+		highlightsToggle.setText("Show bank highlights");
 		highlightsToggle.setSelected(config.showBankHighlights());
 		highlightsToggle.setFocusable(false);
 		highlightsToggle.setBackground(ColorScheme.DARKER_GRAY_COLOR);

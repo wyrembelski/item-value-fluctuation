@@ -29,6 +29,8 @@ or crashed (maybe worth holding, maybe worth dumping).
 - **Smart pricing** — untradeable, combination and variant items are valued from their tradeable
   parts; coins and platinum tokens are left alone.
 - **Noise filters** so cheap items and tiny stacks don't clutter the view.
+- **Visibility hotkey** — bind a key to reveal or hide the bank highlights on demand (toggle, hold
+  to show, or hold to hide). Off by default; the side panel is never affected.
 - **Never touches your bank** — it only paints colour over the slots the game already laid out.
 
 ## Installation
@@ -113,6 +115,23 @@ fail those), but ignores the minimum-GP-swing filter and the gains/losses mode. 
 Note: the wiki price history only goes back one year, so this is a **1-year high, not an all-time
 high**.
 
+## Show or hide the highlights with a hotkey (optional)
+
+Want to keep the plugin running all the time but only colour your bank when you ask? Bind a key
+under the **Visibility** settings. It is unbound by default, so nothing changes until you set one,
+and it only affects the bank highlights and their hover tooltip — the Movers side panel is never
+touched.
+
+Pick how the key behaves with the **Visibility mode** dropdown:
+
+- **Toggle** — tap the key to switch the bank highlights on or off; they stay that way until you
+  press it again. Highlights start on each session.
+- **Hold to show** — the highlights stay hidden and only appear while you hold the key down.
+- **Hold to hide** — the highlights are shown as usual and disappear only while you hold the key.
+
+The toggle resets to its starting state each time you log in, so you never log in to a bank you
+forgot you had hidden.
+
 ## How values are calculated
 
 Short version: the plugin shows the **instant-sell price now** versus the **instant-sell price at
@@ -183,6 +202,8 @@ Everything has a sensible default, so the plugin works out of the box. The main 
 | Near 1-year high orb | Mark items at/near their yearly peak | Off |
 | Near-high threshold | How close to the yearly high counts as "near" | 5% |
 | Exclude alch-floored items | Skip items held flat by their high-alch value | On |
+| Visibility hotkey | A key that reveals/hides the bank highlights | Unbound |
+| Visibility mode | How the hotkey behaves (toggle / hold to show / hold to hide) | Toggle |
 
 Open the plugin's settings in RuneLite to see the full list, grouped into general, filtering,
 gains, losses, and year-high sections.
@@ -196,6 +217,14 @@ only paints colour over the slots the game already laid out. It injects no input
 actions to the server.
 
 ## Changelog
+
+### 1.3
+- **Visibility hotkey.** Bind a key to reveal or hide the bank highlights on demand, so you can
+  leave the plugin on all the time but only colour the bank when you want. Three modes: **Toggle**
+  (tap to switch on/off), **Hold to show** (visible only while held), and **Hold to hide** (hidden
+  only while held). Unbound by default, so nothing changes until you set a key, and it only affects
+  the bank highlights and their tooltip — the Movers side panel is never touched. The toggle resets
+  each session.
 
 ### 1.2.1
 - **Fixed combination items being badly under-valued.** Items built from several tradeable parts
