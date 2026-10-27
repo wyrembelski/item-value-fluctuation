@@ -197,6 +197,14 @@ actions to the server.
 
 ## Changelog
 
+### 1.2.1
+- **Fixed combination items being badly under-valued.** Items built from several tradeable parts
+  — most visibly the Avernic treads variants (melee / ranged / magic and the combined **(max)**)
+  — were priced as just one of their component boots (e.g. Avernic treads (max) showed ~3.8M
+  instead of its true ~200M). They are now valued as the full sum of their parts, matching
+  RuneLite's own item pricing. Ornament-kitted items such as the Cannon base (or) are also valued
+  slightly more accurately (base plus kit).
+
 ### 1.2
 - **Fixed ornament-kitted items not being tracked.** Items with an ornament kit applied — e.g.
   Amulet of fury (or), Soul reaper axe (or), godsword and dragon kits — were previously skipped

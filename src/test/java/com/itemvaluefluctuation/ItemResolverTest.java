@@ -71,26 +71,57 @@ public class ItemResolverTest
 	}
 
 	@Test
-	public void ornamentCannonBaseDoesNotDoubleCount()
+	public void ornamentCannonBaseSumsPlainBaseAndKit()
 	{
-		// The League III multicannon base is listed by BOTH a 1:1 base mapping (-> the plain cannon
-		// base piece) AND the multi-part cannon "pack" mapping (-> the assembled cannon set). The
-		// old guard protected against SUMMING those (the "+55%" spike). The fix must collapse to the
-		// single plain base piece, never summing the pack's extra parts.
-		final List<Component> components =
-			resolver.resolveCanonical(ItemID.LEAGUE_3_MULTICANNON_BASE);
-
-		// Exactly one tradeable component: the plain cannon base piece (ItemID.TWPART1 — the base
-		// section of the Dwarf multicannon, tradeable id 6), NOT the assembled-set "pack" tradeable
-		// (LEAGUE_3_MULTICANNON_PACK) and NOT any of the other cannon pieces.
-		assertEquals(1, components.size());
-		final Component only = components.get(0);
-		assertEquals(ItemID.TWPART1, only.getTradeableId());
-		assertEquals(1L, only.getPerItemQuantity());
-		assertFalse("must not sum the pack's assembled-set tradeable",
-			tradeableIds(components).contains(ItemID.LEAGUE_3_MULTICANNON_PACK));
+		// Cannon base (or) = plain cannon base + Shattered cannon ornament kit. In the maintained
+		// ItemMapping table it is listed by ITEM_CANNON_BASE (-> TWPART1, the plain base section)
+		// AND ITEM_SHATTERED_CANNON_ORNAMENT_KIT (-> LEAGUE_3_MULTICANNON_PACK, the ornament KIT
+		// shared across the four cannon pieces). Despite the "_PACK" constant name this is an
+		// ordinary additive base+kit item exactly like a godsword (or), NOT a double-count: RuneLite
+		// itself always sums these. (This test previously asserted a collapse to the plain base,
+		// which dropped the kit and under-priced the item — the same class of bug as Avernic treads.
+		// See the task notes.) It must now sum both distinct tradeable parts, each once.
+		final Map<Integer, Long> byId =
+			byTradeable(resolver.resolveCanonical(ItemID.LEAGUE_3_MULTICANNON_BASE));
+		final Map<Integer, Long> expected = new HashMap<>();
+		expected.put(ItemID.TWPART1, 1L);
+		expected.put(ItemID.LEAGUE_3_MULTICANNON_PACK, 1L);
+		assertEquals(expected, byId);
 		assertFalse("must not price as its own untradeable id",
-			tradeableIds(components).contains(ItemID.LEAGUE_3_MULTICANNON_BASE));
+			byId.containsKey(ItemID.LEAGUE_3_MULTICANNON_BASE));
+	}
+
+	@Test
+	public void avernicTreadsMaxSumsBaseAndAllThreeBoots()
+	{
+		// The reported bug: Avernic treads (max) is listed by FOUR mapping entries whose tradeables
+		// are the genuinely-distinct parts base Avernic treads + Primordial + Pegasian + Eternal
+		// boots. They must SUM (~202M), not collapse to a single boot (~3.83M, the old behaviour).
+		final Map<Integer, Long> byId =
+			byTradeable(resolver.resolveCanonical(ItemID.AVERNIC_TREADS_MAX));
+		final Map<Integer, Long> expected = new HashMap<>();
+		expected.put(ItemID.AVERNIC_TREADS, 1L);
+		expected.put(ItemID.PRIMORDIAL_BOOTS, 1L);
+		expected.put(ItemID.PEGASIAN_BOOTS, 1L);
+		expected.put(ItemID.ETERNAL_BOOTS, 1L);
+		assertEquals(expected, byId);
+		assertFalse("must never price as its own untradeable id",
+			byId.containsKey(ItemID.AVERNIC_TREADS_MAX));
+	}
+
+	@Test
+	public void avernicTreadsTwoPartVariantSumsBaseAndOneBoot()
+	{
+		// A two-part variant locks the general additive rule: Avernic treads (melee) = base Avernic
+		// treads + Primordial boots.
+		final Map<Integer, Long> byId =
+			byTradeable(resolver.resolveCanonical(ItemID.AVERNIC_TREADS_MELEE));
+		final Map<Integer, Long> expected = new HashMap<>();
+		expected.put(ItemID.AVERNIC_TREADS, 1L);
+		expected.put(ItemID.PRIMORDIAL_BOOTS, 1L);
+		assertEquals(expected, byId);
+		assertFalse("must never price as its own untradeable id",
+			byId.containsKey(ItemID.AVERNIC_TREADS_MELEE));
 	}
 
 	@Test
